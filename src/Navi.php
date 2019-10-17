@@ -8,6 +8,13 @@ use Illuminate\Support\Fluent;
 class Navi
 {
     /**
+     * Menu
+     *
+     * @var mixed
+     */
+    protected $menu;
+
+    /**
      * Blacklisted Classes
      *
      * @var array
@@ -23,50 +30,66 @@ class Navi
     ];
 
     /**
-     * Parse the array of WP_Post objects returned by wp_get_nav_menu_items().
+     * Create a new Navi instance.
      *
-     * @param  array $items
-     * @return object
+     * @param  mixed $menu
+     * @return $this
      */
-    protected function parse($items)
+    public function __construct($menu = 'primary_navigation')
     {
-        if (! is_array($items)) {
+        if (is_string($menu)) {
+            $menu = get_nav_menu_locations()[$menu] ?? [];
+        }
+
+        if (empty($menu)) {
             return;
         }
 
-        _wp_menu_item_classes_by_context($items);
+        $menu = wp_get_nav_menu_items($menu);
+        _wp_menu_item_classes_by_context($menu);
 
-        return $this->tree(
-            collect($items)
-                ->map(function ($item) {
-                    return (object) [
-                        'parent' => $this->hasParent($item),
-                        'id' => $item->ID,
-                        'label' => $item->title,
-                        'slug' => $item->post_name,
-                        'url' => $item->url,
-                        'active' => $item->current,
-                        'activeAncestor' => $item->current_item_ancestor,
-                        'activeParent' => $item->current_item_parent,
-                        'classes' => $this->filterClasses($item->classes),
-                        'title' => $item->attr_title,
-                        'description' => $item->description,
-                        'target' => $item->target,
-                        'xfn' => $item->xfn,
-                    ];
-                })
-        );
+        $this->menu = collect($menu);
     }
 
     /**
-     * Returns the menu item's parent if it exists.
+     * Returns the raw nav menu items with the proper navigation hierarchy.
      *
-     * @param  WP_Post $item
-     * @return int|boolean
+     * @return array
      */
-    protected function hasParent($item)
+    public function raw()
     {
-        return $item->menu_item_parent != 0 ? $item->menu_item_parent : false;
+        return
+            $this->menu->map(function ($value, $key) {
+                return [$key => $value];
+            });
+    }
+
+    /**
+     * Parse the array of WP_Post objects returned by wp_get_nav_menu_items().
+     *
+     * @return object
+     */
+    public function toArray()
+    {
+        return $this->tree(
+            $this->menu->map(function ($item) {
+                return new Fluent([
+                    'parent' => $item->menu_item_parent != 0 ? $item->menu_item_parent : false,
+                    'id' => $item->ID,
+                    'label' => $item->title,
+                    'slug' => $item->post_name,
+                    'url' => $item->url,
+                    'active' => $item->current,
+                    'activeAncestor' => $item->current_item_ancestor,
+                    'activeParent' => $item->current_item_parent,
+                    'classes' => $this->filterClasses($item->classes),
+                    'title' => $item->attr_title,
+                    'description' => $item->description,
+                    'target' => $item->target,
+                    'xfn' => $item->xfn,
+                ]);
+            })
+        );
     }
 
     /**
@@ -108,28 +131,5 @@ class Navi
         };
 
         return $branch;
-    }
-
-    /**
-     * Build a fluent instance containing our navigation.
-     *
-     * @param  int|string|WP_Term $menu
-     * @return Illuminate\Support\Fluent
-     */
-    public function build($menu = 'primary_navigation')
-    {
-        if (is_string($menu)) {
-            $menu = get_nav_menu_locations()[$menu] ?? [];
-        }
-
-        if (empty($menu)) {
-            return;
-        }
-
-        return new Fluent(
-            $this->parse(
-                wp_get_nav_menu_items($menu)
-            )
-        );
     }
 }
