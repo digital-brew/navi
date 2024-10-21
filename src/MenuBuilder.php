@@ -6,17 +6,13 @@ class MenuBuilder
 {
     /**
      * The current menu.
-     *
-     * @var array
      */
-    protected $menu = [];
+    protected array $menu = [];
 
     /**
      * The attributes map.
-     *
-     * @var array
      */
-    protected $attributes = [
+    protected array $attributes = [
         'active' => 'current',
         'activeAncestor' => 'current_item_ancestor',
         'activeParent' => 'current_item_parent',
@@ -25,46 +21,39 @@ class MenuBuilder
         'description' => 'description',
         'id' => 'ID',
         'label' => 'title',
+        'object' => 'object',
         'objectId' => 'object_id',
+        'order' => 'menu_order',
         'parent' => 'menu_item_parent',
         'slug' => 'post_name',
         'target' => 'target',
         'title' => 'attr_title',
+        'type' => 'type',
         'url' => 'url',
         'xfn' => 'xfn',
-        'order' => 'menu_order',
     ];
 
     /**
-     * The disallowed classes.
-     *
-     * @var array
+     * The classes to remove from menu items.
      */
-    protected $disallowedClasses = [
-        'current-menu',
-        'current_page',
-        'sub-menu',
-        'menu-item',
-        'menu-item-type-post_type',
-        'menu-item-object-page',
-        'menu-item-type-custom',
-        'menu-item-object-custom',
-        'menu_item',
-        'page-item',
-        'page_item',
-    ];
+    protected array $withoutClasses = [];
 
     /**
-     * Build a filtered array of objects containing the navigation menu items.
-     *
-     * @param  array $menu
-     * @return array
+     * Make a new Menu Builder instance.
      */
-    public function build($menu)
+    public static function make(): self
     {
-        $this->menu = $this->filter((array) $menu);
+        return new static;
+    }
 
-        if (empty($this->menu)) {
+    /**
+     * Build the navigation menu.
+     */
+    public function build(array $menu = []): array
+    {
+        $this->menu = $this->filter($menu);
+
+        if (! $this->menu) {
             return [];
         }
 
@@ -73,38 +62,39 @@ class MenuBuilder
             $this->menu
         );
 
-        return $this->tree(
+        return $this->handle(
             $this->map($this->menu)
         );
     }
 
     /**
-     * Filter the menu item's into a prepared collection.
-     *
-     * @param  array $menu
-     * @return \Illuminate\Support\Collection
+     * Filter the menu items.
      */
-    protected function filter($menu = [])
+    protected function filter(array $menu = []): array
     {
-        $menu = array_filter($menu, function ($item) {
-            return is_a($item, 'WP_Post') || is_a($item, 'WPML_LS_Menu_Item');
-        });
+        $menu = array_filter($menu, fn ($item) => is_a($item, 'WP_Post') || is_a($item, 'WPML_LS_Menu_Item'));
 
-        if (empty($menu)) {
-            return;
+        if (! $menu) {
+            return [];
         }
 
         _wp_menu_item_classes_by_context($menu);
 
         return array_map(function ($item) {
             $classes = array_filter($item->classes, function ($class) {
-                return ! in_array($class, $this->disallowedClasses);
+                foreach ($this->withoutClasses as $value) {
+                    if (str_starts_with($class, $value)) {
+                        return false;
+                    }
+                }
+
+                return true;
             });
 
             $item->classes = is_array($classes) ? implode(' ', $classes) : $classes;
 
             foreach ($item as $key => $value) {
-                if (empty($value)) {
+                if (! $value) {
                     $item->{$key} = false;
                 }
             }
@@ -114,12 +104,9 @@ class MenuBuilder
     }
 
     /**
-     * Map the menu item properties into a fluent object.
-     *
-     * @param  array $menu
-     * @return \Illuminate\Support\Collection
+     * Map the menu items into an object.
      */
-    protected function map($menu = [])
+    protected function map(array $menu = []): array
     {
         return array_map(function ($item) {
             $result = [];
@@ -128,34 +115,41 @@ class MenuBuilder
                 $result[$key] = $item->{$value};
             }
 
-            $result['parentObjectId'] = ! empty($result['parent']) && ! empty($this->menu[$result['parent']]) ?
-                $this->menu[$result['parent']]->object_id :
-                false;
+            $result['parentObjectId'] = ! empty($result['parent']) && ! empty($this->menu[$result['parent']])
+                ? $this->menu[$result['parent']]->object_id
+                : false;
 
             return (object) $result;
         }, $menu);
     }
 
     /**
-     * Build a multi-dimensional array containing children menu items.
-     *
-     * @param  object $items
-     * @param  int    $parent
-     * @param  array  $branch
-     * @return array
+     * Handle the menu item hierarchy.
      */
-    protected function tree($items, $parent = 0, $branch = [])
+    protected function handle(array $items, string|int $parent = 0): array
     {
+        $menu = [];
+
         foreach ($items as $item) {
-            if ($item->parent == $parent) {
-                $children = $this->tree($items, $item->id);
-                $item->children = ! empty($children) ? $children : [];
-
-                $branch[$item->order] = $item;
-                unset($item);
+            if ($item->parent != $parent) {
+                continue;
             }
-        };
 
-        return $branch;
+            $item->children = $this->handle($items, $item->id);
+
+            $menu[$item->id] = $item;
+        }
+
+        return $menu;
+    }
+
+    /**
+     * Remove classes from menu items.
+     */
+    public function withoutClasses(array $classes = []): self
+    {
+        $this->withoutClasses = $classes;
+
+        return $this;
     }
 }
